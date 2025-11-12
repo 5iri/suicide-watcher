@@ -10,7 +10,6 @@ permissions:
   issues: read
   pull-requests: read
   actions: read
-  notifications: write
   # Gives access to your notifications via the automatically provided GITHUB_TOKEN
   # (no need to create a personal token)
 
