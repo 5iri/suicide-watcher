@@ -1,0 +1,128 @@
+name: GitHub → Discord Notifications
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # every 5 minutes
+  workflow_dispatch:        # allow manual run
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+  actions: read
+  notifications: write
+  # Gives access to your notifications via the automatically provided GITHUB_TOKEN
+  # (no need to create a personal token)
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    env:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Fetch unread GitHub notifications
+        id: fetch
+        run: |
+          set -euo pipefail
+
+          API_URL="https://api.github.com/notifications?per_page=50"
+          echo "Fetching unread notifications..."
+
+          HTTP_STATUS=$(curl -sS -w "%{http_code}" -o notifications.json \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$API_URL")
+
+          if [ "$HTTP_STATUS" -lt 200 ] || [ "$HTTP_STATUS" -ge 300 ]; then
+            echo "GitHub API call failed with HTTP $HTTP_STATUS:"
+            cat notifications.json
+            exit 1
+          fi
+
+          if ! jq -e 'type == "array"' notifications.json > /dev/null; then
+            echo "Expected an array of notifications but got:"
+            cat notifications.json
+            exit 1
+          fi
+
+          COUNT=$(jq 'length' notifications.json)
+          echo "Fetched $COUNT notifications."
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Post to Discord & mark as read
+        if: steps.fetch.outputs.count != '0'
+        run: |
+          set -euo pipefail
+
+          if [ ! -s notifications.json ]; then
+            echo "notifications.json is missing; aborting."
+            exit 1
+          fi
+
+          # For each notification, resolve an HTML link, post to Discord, then mark the thread as read
+          jq -c '.[]' notifications.json | while IFS= read -r row; do
+            THREAD_ID=$(jq -r '.id' <<<"$row")
+            REPO=$(jq -r '.repository.full_name' <<<"$row")
+            TITLE=$(jq -r '.subject.title' <<<"$row")
+            TYPE=$(jq -r '.subject.type' <<<"$row")
+            REASON=$(jq -r '.reason' <<<"$row")
+            SUBJECT_URL=$(jq -r '.subject.latest_comment_url // .subject.url // empty' <<<"$row")
+
+            # Resolve an html_url for a nice link (best effort)
+            HTML_URL=""
+            if [ -n "$SUBJECT_URL" ]; then
+              RESP=$(curl -sS -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "$SUBJECT_URL")
+              HTML_URL=$(echo "$RESP" | jq -r '.html_url // empty')
+              if [ -z "$HTML_URL" ]; then
+                # crude fallback: transform API URL to web URL
+                RAW_URL=$(echo "$RESP" | jq -r '.url // empty')
+                if [ -n "$RAW_URL" ]; then
+                  HTML_URL=$(echo "$RAW_URL" | sed 's#https://api.github.com/repos/#https://github.com/#; s#/pulls/#/pull/#')
+                fi
+              fi
+            fi
+            if [ -z "$HTML_URL" ]; then
+              HTML_URL="(link unavailable)"
+            fi
+
+            # Make the reason human-friendly
+            case "$REASON" in
+              assign) WHY="assigned you" ;;
+              author) WHY="your thread" ;;
+              comment) WHY="new comment" ;;
+              invitation) WHY="invited" ;;
+              manual) WHY="subscribed" ;;
+              mention) WHY="mentioned you" ;;
+              review_requested) WHY="requested your review" ;;
+              security_alert) WHY="security alert" ;;
+              state_change) WHY="state changed" ;;
+              subscribed) WHY="subscribed thread" ;;
+              team_mention) WHY="team mention" ;;
+              *) WHY="$REASON" ;;
+            esac
+
+            # Build the Discord message
+            CONTENT="<@${DISCORD_USER_ID}>\n**${REPO}** • **${TYPE}** • ${WHY}\n**${TITLE}**\n${HTML_URL}"
+
+            # Send to Discord webhook
+            curl -sS -X POST "$DISCORD_WEBHOOK_URL" \
+              -H "Content-Type: application/json" \
+              -d "$(jq -n --arg content "$CONTENT" --arg uid "$DISCORD_USER_ID" '{content: $content, allowed_mentions: {users: [$uid]}}')"
+
+            # Mark the notification thread as read to avoid duplicates next run
+            curl -sS -X PATCH \
+              -H "Authorization: Bearer $GITHUB_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              https://api.github.com/notifications/threads/${THREAD_ID} > /dev/null
+          done
+
+      - name: Done / No new notifications
+        if: steps.fetch.outputs.count == '0'
+        run: echo "No unread notifications."
