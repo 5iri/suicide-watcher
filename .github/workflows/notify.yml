@@ -2,7 +2,7 @@ name: GitHub → Discord Notifications
 
 on:
   schedule:
-    - cron: "*/2 * * * *"   # every 2 minutes
+    - cron: "*/5 * * * *"   # every 5 minutes (minimum interval GitHub supports)
   workflow_dispatch:        # allow manual run
 
 permissions:
