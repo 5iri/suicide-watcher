@@ -144,6 +144,26 @@ jobs:
               https://api.github.com/notifications/threads/${THREAD_ID} > /dev/null
           done
 
-      - name: Done / No new notifications
+      - name: Notify when no unread notifications
         if: steps.fetch.outputs.count == '0'
-        run: echo "No unread notifications."
+        run: |
+          set -euo pipefail
+
+          if [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then
+            echo "Missing DISCORD_WEBHOOK_URL secret. Add it to the repository secrets."
+            exit 1
+          fi
+
+          USER_ID="${DISCORD_USER_ID:-}"
+          BODY="No unread GitHub notifications right now."
+          if [ -n "$USER_ID" ]; then
+            CONTENT="<@${USER_ID}>\n${BODY}"
+            PAYLOAD=$(jq -n --arg content "$CONTENT" --arg uid "$USER_ID" '{content: $content, allowed_mentions: {users: [$uid]}}')
+          else
+            CONTENT="$BODY"
+            PAYLOAD=$(jq -n --arg content "$CONTENT" '{content: $content}')
+          fi
+
+          curl -sS -X POST "$DISCORD_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD"
