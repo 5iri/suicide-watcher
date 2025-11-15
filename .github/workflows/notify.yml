@@ -2,7 +2,7 @@ name: GitHub → Discord Notifications
 
 on:
   schedule:
-    - cron: "*/5 * * * *"   # every 5 minutes
+    - cron: "0 */6 * * *"   # every 6 hours
   workflow_dispatch:        # allow manual run
 
 permissions:
@@ -169,7 +169,7 @@ jobs:
           USER_ID="${DISCORD_USER_ID:-}"
           BODY="No unread GitHub notifications right now."
           if [ -n "$USER_ID" ]; then
-            CONTENT="<@${USER_ID}>\n${BODY}"
+            CONTENT="<@${USER_ID}> ${BODY}"
             PAYLOAD=$(jq -n --arg content "$CONTENT" --arg uid "$USER_ID" '{content: $content, allowed_mentions: {users: [$uid]}}')
           else
             CONTENT="$BODY"
