@@ -69,6 +69,12 @@ jobs:
             exit 1
           fi
 
+          WEBHOOK_URL=$(printf "%s" "$DISCORD_WEBHOOK_URL" | tr -d '\r\n')
+          if [ -z "$WEBHOOK_URL" ]; then
+            echo "DISCORD_WEBHOOK_URL evaluates to an empty string after trimming; check your secret value."
+            exit 1
+          fi
+
           if [ ! -s notifications.json ]; then
             echo "notifications.json is missing; aborting."
             exit 1
@@ -132,7 +138,7 @@ jobs:
             fi
 
             # Send to Discord webhook
-            curl -sS -X POST "$DISCORD_WEBHOOK_URL" \
+            curl -sS -X POST "$WEBHOOK_URL" \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD"
 
@@ -154,6 +160,12 @@ jobs:
             exit 1
           fi
 
+          WEBHOOK_URL=$(printf "%s" "$DISCORD_WEBHOOK_URL" | tr -d '\r\n')
+          if [ -z "$WEBHOOK_URL" ]; then
+            echo "DISCORD_WEBHOOK_URL evaluates to an empty string after trimming; check your secret value."
+            exit 1
+          fi
+
           USER_ID="${DISCORD_USER_ID:-}"
           BODY="No unread GitHub notifications right now."
           if [ -n "$USER_ID" ]; then
@@ -164,6 +176,6 @@ jobs:
             PAYLOAD=$(jq -n --arg content "$CONTENT" '{content: $content}')
           fi
 
-          curl -sS -X POST "$DISCORD_WEBHOOK_URL" \
+          curl -sS -X POST "$WEBHOOK_URL" \
             -H "Content-Type: application/json" \
             -d "$PAYLOAD"
