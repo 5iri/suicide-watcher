@@ -64,9 +64,19 @@ jobs:
         run: |
           set -euo pipefail
 
+          if [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then
+            echo "Missing DISCORD_WEBHOOK_URL secret. Add it to the repository secrets."
+            exit 1
+          fi
+
           if [ ! -s notifications.json ]; then
             echo "notifications.json is missing; aborting."
             exit 1
+          fi
+
+          USER_ID="${DISCORD_USER_ID:-}"
+          if [ -z "$USER_ID" ]; then
+            echo "DISCORD_USER_ID secret not set; notifications will be sent without a mention."
           fi
 
           # For each notification, resolve an HTML link, post to Discord, then mark the thread as read
@@ -112,12 +122,19 @@ jobs:
             esac
 
             # Build the Discord message
-            CONTENT="<@${DISCORD_USER_ID}>\n**${REPO}** • **${TYPE}** • ${WHY}\n**${TITLE}**\n${HTML_URL}"
+            BODY="**${REPO}** • **${TYPE}** • ${WHY}\n**${TITLE}**\n${HTML_URL}"
+            if [ -n "$USER_ID" ]; then
+              CONTENT="<@${USER_ID}>\n${BODY}"
+              PAYLOAD=$(jq -n --arg content "$CONTENT" --arg uid "$USER_ID" '{content: $content, allowed_mentions: {users: [$uid]}}')
+            else
+              CONTENT="$BODY"
+              PAYLOAD=$(jq -n --arg content "$CONTENT" '{content: $content}')
+            fi
 
             # Send to Discord webhook
             curl -sS -X POST "$DISCORD_WEBHOOK_URL" \
               -H "Content-Type: application/json" \
-              -d "$(jq -n --arg content "$CONTENT" --arg uid "$DISCORD_USER_ID" '{content: $content, allowed_mentions: {users: [$uid]}}')"
+              -d "$PAYLOAD"
 
             # Mark the notification thread as read to avoid duplicates next run
             curl -sS -X PATCH \
